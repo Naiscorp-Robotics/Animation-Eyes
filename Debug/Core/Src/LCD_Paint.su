@@ -1,0 +1,16 @@
+../Core/Src/LCD_Paint.c:7:6:LCD_Paint_DrawPixel	24	static
+../Core/Src/LCD_Paint.c:11:6:LCD_Paint_FillRect	40	static
+../Core/Src/LCD_Paint.c:15:6:LCD_Paint_WritePixel	24	static
+../Core/Src/LCD_Paint.c:19:6:LCD_Paint_WriteLine	48	static
+../Core/Src/LCD_Paint.c:47:6:LCD_Paint_DrawFastVLine	40	static
+../Core/Src/LCD_Paint.c:50:6:LCD_Paint_DrawFastHLine	32	static
+../Core/Src/LCD_Paint.c:54:6:LCD_Paint_DrawLine	40	static
+../Core/Src/LCD_Paint.c:66:6:LCD_Paint_DrawCircle	40	static
+../Core/Src/LCD_Paint.c:96:6:LCD_Paint_DrawCircleHelper	40	static
+../Core/Src/LCD_Paint.c:130:6:LCD_Paint_FillCircleHelper	48	static
+../Core/Src/LCD_Paint.c:161:6:LCD_Paint_FillCircle	40	static
+../Core/Src/LCD_Paint.c:166:6:LCD_Paint_DrawRect	32	static
+../Core/Src/LCD_Paint.c:173:6:LCD_Paint_DrawRoundRect	40	static
+../Core/Src/LCD_Paint.c:186:6:LCD_Paint_FillRoundRect	56	static
+../Core/Src/LCD_Paint.c:194:6:LCD_Paint_DrawTriangle	32	static
+../Core/Src/LCD_Paint.c:200:6:LCD_Paint_FillTriangle	80	static
