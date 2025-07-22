@@ -255,7 +255,7 @@ int main(void)
 	    HAL_Delay(10);
       frame_count++;
       uint32_t now = HAL_GetTick();
-      if (now - last_tick >= 1000) { // Đủ 1 giây
+      if (now - last_tick >= 1000) { 
         fps = frame_count;
         frame_count = 0;
         last_tick = now;
