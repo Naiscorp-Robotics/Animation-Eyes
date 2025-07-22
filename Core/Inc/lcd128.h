@@ -42,9 +42,10 @@ void LCD128_WriteString(LCD128_HandleTypeDef* lcd, uint16_t x, uint16_t y, const
 void LCD128_FillRectangle(LCD128_HandleTypeDef* lcd, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color);
 void LCD128_FillScreen(LCD128_HandleTypeDef* lcd, uint16_t color);
 void LCD128_DrawImage(LCD128_HandleTypeDef* lcd, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_t* data);
+void LCD128_DrawImage_DMA(LCD128_HandleTypeDef* lcd, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_t* data);
 void LCD128_InvertColors(LCD128_HandleTypeDef* lcd, bool invert);
 void LCD128_SetBackLight(LCD128_HandleTypeDef* lcd, uint16_t value);
-
+void LCD128_SetAddressWindow(LCD128_HandleTypeDef* lcd, uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
 #ifdef __cplusplus
 }
 #endif

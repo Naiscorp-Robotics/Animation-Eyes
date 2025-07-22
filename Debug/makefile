@@ -52,6 +52,12 @@ default.size.stdout \
 OBJDUMP_LIST += \
 LCD_TFT.list \
 
+OBJCOPY_HEX += \
+LCD_TFT.hex \
+
+OBJCOPY_BIN += \
+LCD_TFT.bin \
+
 
 # All Target
 all: main-build
@@ -75,12 +81,22 @@ LCD_TFT.list: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
 	@echo 'Finished building: $@'
 	@echo ' '
 
+LCD_TFT.hex: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-objcopy  -O ihex $(EXECUTABLES) "LCD_TFT.hex"
+	@echo 'Finished building: $@'
+	@echo ' '
+
+LCD_TFT.bin: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-objcopy  -O binary $(EXECUTABLES) "LCD_TFT.bin"
+	@echo 'Finished building: $@'
+	@echo ' '
+
 # Other Targets
 clean:
-	-$(RM) LCD_TFT.elf LCD_TFT.list LCD_TFT.map default.size.stdout
+	-$(RM) LCD_TFT.bin LCD_TFT.elf LCD_TFT.hex LCD_TFT.list LCD_TFT.map default.size.stdout
 	-@echo ' '
 
-secondary-outputs: $(SIZE_OUTPUT) $(OBJDUMP_LIST)
+secondary-outputs: $(SIZE_OUTPUT) $(OBJDUMP_LIST) $(OBJCOPY_HEX) $(OBJCOPY_BIN)
 
 fail-specified-linker-script-missing:
 	@echo 'Error: Cannot find the specified linker script. Check the linker settings in the build configuration.'

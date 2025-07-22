@@ -81,7 +81,7 @@ static void LCD128_Reset(LCD128_HandleTypeDef* lcd) {
     LCD128_DELAY(100);
 }
 
-static void LCD128_SetAddressWindow(LCD128_HandleTypeDef* lcd, uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
+void LCD128_SetAddressWindow(LCD128_HandleTypeDef* lcd, uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
     LCD128_WriteCommand(lcd, LCD128_CASET);
     LCD128_WriteData8(lcd, x0 >> 8);
     LCD128_WriteData8(lcd, x0 & 0xFF);
@@ -120,7 +120,7 @@ void LCD128_Init(LCD128_HandleTypeDef* lcd) {
     LCD128_WriteCommand(lcd, 0xB6); LCD128_WriteData8(lcd, 0x00); LCD128_WriteData8(lcd, 0x20);
     LCD128_WriteCommand(lcd, 0x36); LCD128_WriteData8(lcd, 0x08); // vertical
     LCD128_WriteCommand(lcd, 0x3A); LCD128_WriteData8(lcd, 0x05);
-    LCD128_WriteCommand(lcd, 0x90); LCD128_WriteData8(lcd, 0x08); LCD128_WriteData8(lcd, 0x08); LCD128_WriteData8(lcd, 0x08); LCD128_WriteData8(lcd, 0x08); LCD128_WriteData8(lcd, 0x08);
+    LCD128_WriteCommand(lcd, 0x90); LCD128_WriteData8(lcd, 0x08); LCD128_WriteData8(lcd, 0x08); LCD128_WriteData8(lcd, 0x08); LCD128_WriteData8(lcd, 0x08); LCD128_WriteData8(lcd, 0x08); LCD128_WriteData8(lcd, 0x08);
     LCD128_WriteCommand(lcd, 0xBD); LCD128_WriteData8(lcd, 0x06);
     LCD128_WriteCommand(lcd, 0xBC); LCD128_WriteData8(lcd, 0x00);
     LCD128_WriteCommand(lcd, 0xFF); LCD128_WriteData8(lcd, 0x60); LCD128_WriteData8(lcd, 0x01); LCD128_WriteData8(lcd, 0x04);
@@ -214,13 +214,29 @@ void LCD128_DrawImage(LCD128_HandleTypeDef* lcd, uint16_t x, uint16_t y, uint16_
     LCD128_CS_1(lcd);
 }
 
+// Biến trạng thái DMA (nên đặt volatile nếu dùng trong ngắt)
+volatile uint8_t lcd128_dma_busy = 0;
+
+void LCD128_DrawImage_DMA(LCD128_HandleTypeDef* lcd, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_t* data) {
+    if ((x >= LCD128_WIDTH) || (y >= LCD128_HEIGHT)) return;
+    if ((x + w - 1) >= LCD128_WIDTH) return;
+    if ((y + h - 1) >= LCD128_HEIGHT) return;
+    LCD128_SetAddressWindow(lcd, x, y, x + w - 1, y + h - 1);
+    LCD128_DC_1(lcd);
+    LCD128_CS_0(lcd);
+    lcd128_dma_busy = 1;
+    // Truyền buffer qua DMA, mỗi pixel 2 byte
+    HAL_SPI_Transmit_DMA(lcd->hspi, (uint8_t*)data, w * h * 2);
+    // Không đóng CS ở đây, sẽ đóng trong callback khi DMA xong
+}
+
 void LCD128_InvertColors(LCD128_HandleTypeDef* lcd, bool invert) {
     LCD128_WriteCommand(lcd, invert ? LCD128_INVON : LCD128_INVOFF);
 }
 
 void LCD128_SetBackLight(LCD128_HandleTypeDef* lcd, uint16_t value) {
     // Tùy vào phần cứng, bạn có thể điều khiển backlight ở đây
-    // Ví dụ: HAL_TIM_PWM_SetCompare(...)
+    // Ví dụ: HAL_TIM_PWM_SetCompare(...)k
     (void)lcd; // tránh warning nếu chưa dùng
     (void)value;
 } 

@@ -19,5 +19,6 @@ void LCD_Paint_DrawRoundRect(LCD128_HandleTypeDef* lcd, int16_t x, int16_t y, in
 void LCD_Paint_FillRoundRect(LCD128_HandleTypeDef* lcd, int16_t x, int16_t y, int16_t w, int16_t h, int16_t r, uint16_t color);
 void LCD_Paint_DrawTriangle(LCD128_HandleTypeDef* lcd, int16_t x0, int16_t y0, int16_t x1, int16_t y1, int16_t x2, int16_t y2, uint16_t color);
 void LCD_Paint_FillTriangle(LCD128_HandleTypeDef* lcd, int16_t x0, int16_t y0, int16_t x1, int16_t y1, int16_t x2, int16_t y2, uint16_t color);
+void LCD_Paint_DrawDashedEllipse(LCD128_HandleTypeDef* lcd, int16_t x0, int16_t y0, int16_t rx, int16_t ry, int dashStep, int dashLength, int dotRadius, uint16_t color);
 
 #endif 

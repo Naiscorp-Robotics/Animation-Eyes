@@ -1,6 +1,6 @@
 #include "LCD_Paint.h"
 #include <stdlib.h>
-
+#include <math.h>
 #define _swap_int16_t(a, b) { int16_t t = a; a = b; b = t; }
 #define min(a, b) (((a) < (b)) ? (a) : (b))
 
@@ -229,5 +229,17 @@ void LCD_Paint_FillTriangle(LCD128_HandleTypeDef* lcd, int16_t x0, int16_t y0, i
         sb += dx02;
         if (a > b) _swap_int16_t(a, b);
         LCD_Paint_DrawFastHLine(lcd, a, y, b - a + 1, color);
+    }
+}
+
+void LCD_Paint_DrawDashedEllipse(LCD128_HandleTypeDef* lcd, int16_t x0, int16_t y0, int16_t rx, int16_t ry, int dashStep, int dashLength, int dotRadius, uint16_t color) {
+    for (int angle = 0; angle < 360; angle += dashStep) {
+        for (int i = 0; i < dashLength; i++) {
+            float theta = (angle + i) * 3.14159f / 180.0f;
+            int x = x0 + rx * cosf(theta);
+            int y = y0 + ry * sinf(theta);
+            LCD_Paint_FillCircle(lcd, x, y, dotRadius, color);
+//            LCD_Paint_FillCircle(lcd, x + 3, y + 3, dotRadius, color);
+        }
     }
 } 

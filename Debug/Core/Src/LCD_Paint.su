@@ -14,3 +14,4 @@
 ../Core/Src/LCD_Paint.c:186:6:LCD_Paint_FillRoundRect	56	static
 ../Core/Src/LCD_Paint.c:194:6:LCD_Paint_DrawTriangle	32	static
 ../Core/Src/LCD_Paint.c:200:6:LCD_Paint_FillTriangle	80	static
+../Core/Src/LCD_Paint.c:235:6:LCD_Paint_DrawDashedEllipse	64	static

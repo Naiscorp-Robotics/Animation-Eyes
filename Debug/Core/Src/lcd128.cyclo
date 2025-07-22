@@ -11,7 +11,7 @@
 ../Core/Src/lcd128.c:57:13:LCD128_WriteData16	1
 ../Core/Src/lcd128.c:66:13:LCD128_WriteDataN	2
 ../Core/Src/lcd128.c:75:13:LCD128_Reset	1
-../Core/Src/lcd128.c:84:13:LCD128_SetAddressWindow	1
+../Core/Src/lcd128.c:84:6:LCD128_SetAddressWindow	1
 ../Core/Src/lcd128.c:100:6:LCD128_Init	1
 ../Core/Src/lcd128.c:157:6:LCD128_DrawPixel	3
 ../Core/Src/lcd128.c:163:13:LCD128_WriteChar	4
@@ -19,5 +19,6 @@
 ../Core/Src/lcd128.c:188:6:LCD128_FillRectangle	6
 ../Core/Src/lcd128.c:198:6:LCD128_FillScreen	1
 ../Core/Src/lcd128.c:202:6:LCD128_DrawImage	6
-../Core/Src/lcd128.c:217:6:LCD128_InvertColors	2
-../Core/Src/lcd128.c:221:6:LCD128_SetBackLight	1
+../Core/Src/lcd128.c:220:6:LCD128_DrawImage_DMA	5
+../Core/Src/lcd128.c:233:6:LCD128_InvertColors	2
+../Core/Src/lcd128.c:237:6:LCD128_SetBackLight	1
