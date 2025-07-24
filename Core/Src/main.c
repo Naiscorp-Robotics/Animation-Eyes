@@ -57,8 +57,6 @@ typedef enum {
   STATE_RANDOM_MOVE,
   STATE_RANDOM_MOVE1,
   STATE_RANDOM_TO_CENTER,
-  STATE_SURPRISED_GROW,
-  STATE_SURPRISED_SHRINK,
   STATE_PUPIL_ROTATE
 
 } MoveState;
@@ -79,46 +77,23 @@ LCD128_HandleTypeDef lcd1;
 LCD128_HandleTypeDef lcd2;
 /* USER CODE BEGIN PV */
 // Trong USER CODE BEGIN PV
+// Thêm khai báo extern biến trạng thái DMA
 extern volatile uint8_t lcd128_dma_busy;
-int centerX, centerY;
-int rx_in, ry_in;
-int pupilRadius, eyeRadius;
-int pupilX, pupilY;
+uint8_t centerX, centerY;
+uint8_t rx_in, ry_in; // Bán trục lớn của elip trong
+uint8_t pupilRadius, eyeRadius;
+uint8_t pupilX, pupilY;
 MoveState state;
-uint32_t last_tick;
-uint32_t frame_count;
-uint32_t fps;
-char fps_buf[16];
+// Thêm biến cho nội suy
 int lerp_startX, lerp_startY, lerp_targetX, lerp_targetY;
 float lerp_t;
-int lerp_steps;
-int random_count;
-const int RANDOM_REPEAT = 20;
-
-// // Thêm khai báo extern biến trạng thái DMA
-//   extern volatile uint8_t lcd128_dma_busy;
-//   // Khởi tạo tham số.
-//   int centerX = 120, centerY = 120;
-//   int rx_in  = 70, ry_in  = 90;   // Bán trục lớn của elip trong
-//   int pupilRadius = 32;
-//   int eyeRadius = pupilRadius / 2;
-//   int pupilX = centerX, pupilY = centerY;
-//   /* USER CODE END 2 */
-//   MoveState state = STATE_RANDOM_MOVE1;
-//   // Thêm biến đo FPS
-//   uint32_t last_tick = HAL_GetTick();
-//   uint32_t frame_count = 0;
-//   uint32_t fps = 0;
-//   char fps_buf[16];
-//   // Thêm biến cho nội suy
-//   int lerp_startX = 0, lerp_startY = 0, lerp_targetX = 0, lerp_targetY = 0;
-//   float lerp_t = 1.0f; // 1.0 nghĩa là đã đến đích, cần setup mới
-//   int lerp_steps = 40; // Số frame để di chuyển (có thể điều chỉnh tốc độ)
-//   static int random_count = 0;
-//   const int RANDOM_REPEAT = 30; // Số lần random liên tiếp mong muốn
+int lerp_steps; // Số frame để di chuyển (có thể điều chỉnh tốc độ)
+const int RANDOM_REPEAT = 20; // Số lần random liên tiếp mong muốn
+uint8_t state_index, state_sequence_len, random_count;
 
 // Thứ tự các trạng thái chuyển động
-MoveState state_sequence[] = {
+const MoveState state_sequence[] = {
+    STATE_RANDOM_MOVE1,
     STATE_UP_FROM_CENTER,
     STATE_UPLEFT_FROM_CENTER,
     STATE_UPRIGHT_FROM_CENTER,
@@ -138,17 +113,16 @@ MoveState state_sequence[] = {
     STATE_UPRIGHT_TO_CENTER,
     STATE_UPRIGHT_FROM_CENTER,
     STATE_DOWNLEFT_TO_CENTER,
+    STATE_RANDOM_MOVE1,
     STATE_DOWNLEFT_FROM_CENTER,
     STATE_UPRIGHT_TO_CENTER,
     STATE_DOWNRIGHT_FROM_CENTER,
     STATE_UPLEFT_TO_CENTER,
 
     STATE_RANDOM_MOVE,
-    STATE_RANDOM_MOVE1,
     STATE_RANDOM_TO_CENTER,
 };
-int state_sequence_len;
-int state_index;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -159,12 +133,26 @@ static void MX_SPI1_Init(void);
 static void MX_SPI2_Init(void);
 
 /* USER CODE BEGIN PFP */
-#define BUF_W 70
-#define BUF_H 70
-uint16_t framebuf[BUF_H][BUF_W];
-void draw_eye_with_pupil_to_buffer(int cx, int cy, int r, int pupil_r, int pupil_offset_x, int pupil_offset_y, uint16_t eye_color, uint16_t pupil_color, uint16_t bgcolor);
+#define BUF_W 82
+#define BUF_H 82
+uint16_t framebuf[BUF_W * BUF_H];
+// void draw_eye_with_pupil_to_buffer(int cx, int cy, int r, int pupil_r, int pupil_offset_x, int pupil_offset_y, uint16_t eye_color, uint16_t pupil_color, uint16_t bgcolor);
+void draw_eye_with_pupil_to_buffer(int cx, int cy, int r, int pupil_r, int pupil_offset_x, int pupil_offset_y, uint16_t outer_color, uint16_t inner_color, uint16_t bgcolor, uint16_t pupil_color);
+void draw_realistic_eye(int cx, int cy, int r, int pupil_r, int pupil_offset_x, int pupil_offset_y,uint16_t bgcolor); 
 void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi);
 void Animation_Loop(void);
+// === Blend nhanh giữa 2 màu RGB565 ===
+uint16_t blend_color_fast(uint16_t c1, uint16_t c2, uint8_t t) {
+    uint8_t r1 = (c1 >> 11) & 0x1F, g1 = (c1 >> 5) & 0x3F, b1 = c1 & 0x1F;
+    uint8_t r2 = (c2 >> 11) & 0x1F, g2 = (c2 >> 5) & 0x3F, b2 = c2 & 0x1F;
+
+    uint8_t r = ((r1 * (255 - t)) + (r2 * t)) >> 8;
+    uint8_t g = ((g1 * (255 - t)) + (g2 * t)) >> 8;
+    uint8_t b = ((b1 * (255 - t)) + (b2 * t)) >> 8;
+
+    return (r << 11) | (g << 5) | b;
+}
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -218,30 +206,26 @@ int main(void)
   LCD128_Init(&lcd1);
   LCD128_Init(&lcd2);
 
-  LCD128_FillScreen(&lcd1, LCD128_BLACK);
-  LCD128_FillScreen(&lcd2, LCD128_BLACK);
+  LCD128_FillScreen(&lcd1, LCD128_WHITE);
+  LCD128_FillScreen(&lcd2, LCD128_WHITE);
 
-  LCD_Paint_DrawDashedEllipse(&lcd1, 120, 120, 83, 108, 6, 2, 2, LCD128_WHITE);
-  LCD_Paint_DrawDashedEllipse(&lcd1, 120, 120, 90, 115, 7, 2, 2, LCD128_WHITE);
-  LCD_Paint_DrawDashedEllipse(&lcd1, 120, 120, 95, 120, 8, 2, 2, LCD128_WHITE);
-  LCD_Paint_DrawDashedEllipse(&lcd2, 120, 120, 83, 108, 6, 2, 2, LCD128_WHITE);
-  LCD_Paint_DrawDashedEllipse(&lcd2, 120, 120, 90, 115, 7, 2, 2, LCD128_WHITE);
-  LCD_Paint_DrawDashedEllipse(&lcd2, 120, 120, 95, 120, 8, 2, 2, LCD128_WHITE);
+  LCD_Paint_DrawDashedEllipse(&lcd1, 120, 120, 105, 105, 10, 7, 2, LCD128_BLACK);
+  LCD_Paint_DrawDashedEllipse(&lcd1, 120, 120, 112, 112, 10, 7, 2, LCD128_BLACK);
+  LCD_Paint_DrawDashedEllipse(&lcd1, 120, 120, 118, 118, 10, 7, 2, LCD128_BLACK);
 
+  LCD_Paint_DrawDashedEllipse(&lcd2, 120, 120, 105, 105, 10, 7, 2, LCD128_BLACK);
+  LCD_Paint_DrawDashedEllipse(&lcd2, 120, 120, 112, 112, 10, 7, 2, LCD128_BLACK);
+  LCD_Paint_DrawDashedEllipse(&lcd2, 120, 120, 118, 118, 10, 7, 2, LCD128_BLACK);
 
 
   centerX = 120; centerY = 120;
-  rx_in  = 70; ry_in  = 90;
-  pupilRadius = 32;
+  rx_in  = 80; ry_in  = 80;
+  pupilRadius = 35;
   eyeRadius = pupilRadius / 2;
   pupilX = centerX; pupilY = centerY; 
-  state = STATE_RANDOM_MOVE1;
-  last_tick = HAL_GetTick();
-  frame_count = 0;
-  fps = 0;
   lerp_startX = lerp_startY = lerp_targetX = lerp_targetY = 0;
   lerp_t = 1.0f;
-  lerp_steps = 30;
+  lerp_steps = 15;
   random_count = 0;
   state_sequence_len = sizeof(state_sequence) / sizeof(state_sequence[0]);
   state_index = 0;
@@ -252,17 +236,7 @@ int main(void)
   while (1)
   {
       Animation_Loop();
-	    HAL_Delay(10);
-      frame_count++;
-      uint32_t now = HAL_GetTick();
-      if (now - last_tick >= 1000) { 
-        fps = frame_count;
-        frame_count = 0;
-        last_tick = now;
-        sprintf(fps_buf, "%lu", fps);
-        LCD_Paint_FillRect(&lcd1, 0, 120, 60, 16, LCD128_BLACK); 
-        LCD128_WriteString(&lcd1, 0, 120, fps_buf, Font_11x18, LCD128_WHITE, LCD128_BLACK);
-      }
+	    // HAL_Delay(10);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -287,22 +261,42 @@ void Animation_Loop(void){
           pupil_offset_y = (int)(pupil_offset_y * max_offset / dist);
       }
 
-      draw_eye_with_pupil_to_buffer(BUF_W/2, BUF_H/2, pupilRadius, eyeRadius, pupil_offset_x, pupil_offset_y, LCD128_WHITE, LCD128_BLACK, LCD128_BLACK);
+      draw_eye_with_pupil_to_buffer(BUF_W/2, BUF_H/2, pupilRadius, eyeRadius, pupil_offset_x, pupil_offset_y, LCD128_BLACK, EYE_BLUE_1, LCD128_WHITE, LCD128_BLACK);
+
 
 	    LCD128_DrawImage_DMA(&lcd1, pupilX - BUF_W/2, pupilY - BUF_H/2, BUF_W, BUF_H, (uint16_t*)framebuf);
 	    LCD128_DrawImage_DMA(&lcd2, pupilX - BUF_W/2, pupilY - BUF_H/2, BUF_W, BUF_H, (uint16_t*)framebuf);
 	    while (lcd128_dma_busy);
 
+      // --- PAUSE LOGIC ---
+      static int pause_counter = 0;
+      static int is_pausing = 0;
+      int is_random_state = (state == STATE_RANDOM_MOVE || state == STATE_RANDOM_MOVE1 || state == STATE_RANDOM_TO_CENTER);
+      if (lerp_t >= 1.0f) {
+          if (!is_random_state) { // Chỉ pause nếu KHÔNG phải random
+              if (!is_pausing) {
+                  pause_counter = 0;
+                  is_pausing = 1;
+              }
+              if (pause_counter < 10) { // 40 frame ~ 0.7s
+                  pause_counter++;
+                  return;
+              }
+              is_pausing = 0;
+          }
+          // Sau khi pause (hoặc nếu là random), cho phép chuyển trạng thái mới
+      }
+
       if (lerp_t < 1.0f) {
-          lerp_t += 1.0f / lerp_steps;
+          lerp_t += 1.5f / lerp_steps;
           if (lerp_t > 1.0f) lerp_t = 1.0f;
           pupilX = lerp_startX + (int)((lerp_targetX - lerp_startX) * lerp_t);
           pupilY = lerp_startY + (int)((lerp_targetY - lerp_startY) * lerp_t);
-      } else {
+      } else if (!is_pausing) {
           switch (state) {
                 case STATE_RANDOM_MOVE1: {
-                      int rangeX = rx_in - pupilRadius * 2;
-                      int rangeY = ry_in - pupilRadius * 2;
+                      int rangeX = rx_in - pupilRadius * 0.5;
+                      int rangeY = ry_in - pupilRadius * 0.5;
                   
                       if (random_count < RANDOM_REPEAT) {
                           lerp_startX = pupilX;
@@ -477,8 +471,8 @@ void Animation_Loop(void){
               case STATE_RANDOM_MOVE:
                   if (random_count < RANDOM_REPEAT) {
                       lerp_startX = pupilX; lerp_startY = pupilY;
-                      lerp_targetX = centerX + (rand() % (rx_in - pupilRadius * 2)) - (rx_in - pupilRadius) / 2;
-                      lerp_targetY = centerY + (rand() % (ry_in - pupilRadius * 2)) - (ry_in - pupilRadius) / 2;
+                      lerp_targetX = centerX + (rand() % (rx_in - pupilRadius * 2));
+                      lerp_targetY = centerY + (rand() % (ry_in - pupilRadius * 2));
                       lerp_t = 0.0f;
                       random_count++;
                   } else {
@@ -502,38 +496,81 @@ void Animation_Loop(void){
                   state = state_sequence[state_index];
                   break;
               case STATE_PUPIL_ROTATE:
-              case STATE_SURPRISED_GROW:
-              case STATE_SURPRISED_SHRINK:
                   break;
               
           }
       }
 }
 
-void draw_eye_with_pupil_to_buffer(int cx, int cy, int r, int pupil_r, int pupil_offset_x, int pupil_offset_y, uint16_t eye_color, uint16_t pupil_color, uint16_t bgcolor) {
-    // Vẽ tròng mắt (vòng tròn trắng)
-    for (int y = 0; y < BUF_H; y++) {
-        for (int x = 0; x < BUF_W; x++) {
-            int dx = x - cx;
-            int dy = y - cy;
-            if (dx*dx + dy*dy <= r*r)
-                framebuf[y][x] = eye_color;   // Màu tròng mắt
-            else
-                framebuf[y][x] = bgcolor;     // Màu nền
-        }
-    }
-    // Vẽ con ngươi (vòng tròn đen nhỏ hơn, có thể lệch tâm)
-    int pupil_cx = cx + pupil_offset_x;
-    int pupil_cy = cy + pupil_offset_y;
-    for (int y = 0; y < BUF_H; y++) {
-        for (int x = 0; x < BUF_W; x++) {
-            int dx = x - pupil_cx;
-            int dy = y - pupil_cy;
-            if (dx*dx + dy*dy <= pupil_r*pupil_r)
-                framebuf[y][x] = LCD128_YELLOW; // Màu con ngươi
-        }
-    }
+void draw_eye_with_pupil_to_buffer(
+  int cx, int cy, int r,
+  int pupil_r, int pupil_offset_x, int pupil_offset_y,
+  uint16_t outer_color, uint16_t inner_color, uint16_t bgcolor, uint16_t pupil_color
+) {
+  int r2 = r * r ;
+  int pupil_cx = cx;
+  int pupil_cy = cy;
+  // Biến tick cho hiệu ứng rung highlight
+  static int highlight_tick = 0;
+  highlight_tick++;
+
+  // Tham số rung
+  float shake_ampl = 2.0f; // Biên độ rung (pixel)
+  float shake1 = shake_ampl * sinf(highlight_tick * 0.15f);
+  float shake2 = shake_ampl * cosf(highlight_tick * 0.18f);
+  int highlight_cx3 = cx - r / 3 + (int)(1.5f * sinf(highlight_tick * 0.22f)) + 15;
+  int highlight_cy3 = cy - r / 3 + (int)(1.5f * cosf(highlight_tick * 0.19f)) - 3;
+  int show_highlight3 = ((highlight_tick % 120) < 10);
+
+  for (int y = 0; y < BUF_H; y++) {
+      int dy = y - cy;
+      int dy2 = dy * dy;
+      for (int x = 0; x < BUF_W; x++) {
+          int dx = x - cx;
+          int dist2 = dx * dx + dy2;
+          uint16_t color = bgcolor;
+          if (dist2 <= r2) {
+              // // Tính tỷ lệ nội suy (0 - 255)
+              int t = (dist2 * 255) / r2;
+              color = blend_color_fast(inner_color, outer_color, (uint8_t)(t*0.7f));
+              int dx_pupil = x - pupil_cx;
+              int dy_pupil = y - pupil_cy;
+              if (dx_pupil * dx_pupil + dy_pupil * dy_pupil <= pupil_r * pupil_r) {
+                  color = 0x0000;
+              }
+          }
+
+          // Vẽ highlight – chấm sáng trong mắt (rung nhẹ quanh vị trí gốc)
+          int highlight_radius = 8;
+          int highlight_cx = cx - r / 3 + (int)shake1;
+          int highlight_cy = cy - r / 3 + (int)shake2;
+          int dx_h = x - highlight_cx;
+          int dy_h = y - highlight_cy;
+          if (dx_h * dx_h + dy_h * dy_h <= highlight_radius * highlight_radius) {
+              color = 0xFFFF; // Màu trắng
+          }
+          // Highlight 2: đối xứng qua tâm, cũng rung nhẹ
+          int highlight_radius1 = 4;
+          int highlight_cx1 = 2 * cx - highlight_cx;
+          int highlight_cy1 = 2 * cy - highlight_cy;
+          int dx_h1 = x - highlight_cx1;
+          int dy_h1 = y - highlight_cy1;
+          if (dx_h1 * dx_h1 + dy_h1 * dy_h1 <= highlight_radius1 * highlight_radius1) {
+              color = 0xFFFF; // Màu trắng
+          }
+
+          int highlight_radius3 = 6;
+          int dx_h3 = x - highlight_cx3;
+          int dy_h3 = y - highlight_cy3;
+          if (show_highlight3 && (dx_h3 * dx_h3 + dy_h3 * dy_h3 <= highlight_radius3 * highlight_radius3)) {
+              color = 0xFFFF;
+          }
+
+          framebuf[y * BUF_W + x] = color;
+      }
   }
+}
+
 
 void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi) {
     if (hspi->Instance == SPI1) {
