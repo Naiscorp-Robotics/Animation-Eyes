@@ -65,8 +65,9 @@ typedef struct {
 // #define GC9A01A_SALMON      0xFA60  // Màu cá hồi
 
 // dùng thường
-// #define LCD128_COLOR565(r, g, b) \
-//   (((r & 0xF8) << 8) | ((g & 0xFC) << 3) | ((b & 0xF8) >> 3))
+/* #define LCD128_COLOR565(r, g, b) \
+   (((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)) */
+
 // dùng cho dma
 #define LCD128_COLOR565(g, r, b) \
   (((b & 0xF8) << 8) | ((g & 0xFC) << 3) | ((r & 0xF8) >> 3))

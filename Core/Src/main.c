@@ -51,7 +51,7 @@ typedef enum {
   STATE_DOWNLEFT_TO_CENTER,
   STATE_DOWNLEFT_FROM_CENTER,
   STATE_UPRIGHT_TO_CENTER,
-  STATE_DOWNRIGHT_FROM_CENTER,
+//  STATE_DOWNRIGHT_FROM_CENTER,
   STATE_UPLEFT_TO_CENTER,
 
   STATE_RANDOM_MOVE,
@@ -65,6 +65,32 @@ typedef enum {
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
+#define BUF_W 120
+#define BUF_H 120
+#define BLOCK_LINES 1
+void draw_eye_with_pupil_to_buffer(int cx, int cy, int r, int pupil_r, int pupil_offset_x, int pupil_offset_y, uint16_t outer_color, uint16_t inner_color, uint16_t bgcolor, uint16_t pupil_color);
+void draw_realistic_eye(int cx, int cy, int r, int pupil_r, int pupil_offset_x, int pupil_offset_y,uint16_t bgcolor); 
+void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi);
+void Animation_Loop(void);
+void update_animation_state(void);
+void draw_eye_line_with_pupil_to_buffer(
+  int y, int cx, int cy, int r,
+  int pupil_r, int pupil_offset_x, int pupil_offset_y,
+  uint16_t outer_color, uint16_t inner_color, uint16_t bgcolor, uint16_t pupil_color,
+  uint16_t* linebuf,
+  int highlight_tick
+);
+// === Blend nhanh giữa 2 màu RGB565 ===
+uint16_t blend_color_fast(uint16_t c1, uint16_t c2, uint8_t t) {
+    uint8_t r1 = (c1 >> 11) & 0x1F, g1 = (c1 >> 5) & 0x3F, b1 = c1 & 0x1F;
+    uint8_t r2 = (c2 >> 11) & 0x1F, g2 = (c2 >> 5) & 0x3F, b2 = c2 & 0x1F;
+
+    uint8_t r = ((r1 * (255 - t)) + (r2 * t)) >> 8;
+    uint8_t g = ((g1 * (255 - t)) + (g2 * t)) >> 8;
+    uint8_t b = ((b1 * (255 - t)) + (b2 * t)) >> 8;
+
+    return (r << 11) | (g << 5) | b;
+}
 
 /* USER CODE END PM */
 
@@ -90,7 +116,8 @@ float lerp_t;
 int lerp_steps; // Số frame để di chuyển (có thể điều chỉnh tốc độ)
 const int RANDOM_REPEAT = 20; // Số lần random liên tiếp mong muốn
 uint8_t state_index, state_sequence_len, random_count;
-
+// Thêm biến toàn cục cho highlight_tick
+int global_highlight_tick = 0;
 // Thứ tự các trạng thái chuyển động
 const MoveState state_sequence[] = {
     STATE_RANDOM_MOVE1,
@@ -116,9 +143,8 @@ const MoveState state_sequence[] = {
     STATE_RANDOM_MOVE1,
     STATE_DOWNLEFT_FROM_CENTER,
     STATE_UPRIGHT_TO_CENTER,
-    STATE_DOWNRIGHT_FROM_CENTER,
+//    STATE_DOWNRIGHT_FROM_CENTER,
     STATE_UPLEFT_TO_CENTER,
-
     STATE_RANDOM_MOVE,
     STATE_RANDOM_TO_CENTER,
 };
@@ -131,27 +157,7 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_SPI2_Init(void);
-
 /* USER CODE BEGIN PFP */
-#define BUF_W 82
-#define BUF_H 82
-uint16_t framebuf[BUF_W * BUF_H];
-// void draw_eye_with_pupil_to_buffer(int cx, int cy, int r, int pupil_r, int pupil_offset_x, int pupil_offset_y, uint16_t eye_color, uint16_t pupil_color, uint16_t bgcolor);
-void draw_eye_with_pupil_to_buffer(int cx, int cy, int r, int pupil_r, int pupil_offset_x, int pupil_offset_y, uint16_t outer_color, uint16_t inner_color, uint16_t bgcolor, uint16_t pupil_color);
-void draw_realistic_eye(int cx, int cy, int r, int pupil_r, int pupil_offset_x, int pupil_offset_y,uint16_t bgcolor); 
-void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi);
-void Animation_Loop(void);
-// === Blend nhanh giữa 2 màu RGB565 ===
-uint16_t blend_color_fast(uint16_t c1, uint16_t c2, uint8_t t) {
-    uint8_t r1 = (c1 >> 11) & 0x1F, g1 = (c1 >> 5) & 0x3F, b1 = c1 & 0x1F;
-    uint8_t r2 = (c2 >> 11) & 0x1F, g2 = (c2 >> 5) & 0x3F, b2 = c2 & 0x1F;
-
-    uint8_t r = ((r1 * (255 - t)) + (r2 * t)) >> 8;
-    uint8_t g = ((g1 * (255 - t)) + (g2 * t)) >> 8;
-    uint8_t b = ((b1 * (255 - t)) + (b2 * t)) >> 8;
-
-    return (r << 11) | (g << 5) | b;
-}
 
 /* USER CODE END PFP */
 
@@ -219,13 +225,13 @@ int main(void)
 
 
   centerX = 120; centerY = 120;
-  rx_in  = 80; ry_in  = 80;
-  pupilRadius = 35;
+  rx_in  = 65; ry_in  = 65;
+  pupilRadius = 55;
   eyeRadius = pupilRadius / 2;
   pupilX = centerX; pupilY = centerY; 
   lerp_startX = lerp_startY = lerp_targetX = lerp_targetY = 0;
   lerp_t = 1.0f;
-  lerp_steps = 15;
+  lerp_steps = 10;
   random_count = 0;
   state_sequence_len = sizeof(state_sequence) / sizeof(state_sequence[0]);
   state_index = 0;
@@ -235,11 +241,11 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+      // --- Cập nhật trạng thái animation ---
+      update_animation_state();
+      // --- Khóa trạng thái, vẽ và gửi frame ---
       Animation_Loop();
-	    // HAL_Delay(10);
-    /* USER CODE END WHILE */
-
-    /* USER CODE BEGIN 3 */
+      // HAL_Delay(2);
   }
   /* USER CODE END 3 */
 }
@@ -260,322 +266,578 @@ void Animation_Loop(void){
           pupil_offset_x = (int)(pupil_offset_x * max_offset / dist);
           pupil_offset_y = (int)(pupil_offset_y * max_offset / dist);
       }
+      // --- KHÓA TRẠNG THÁI ---
+      int pupilX_snapshot = pupilX;
+      int pupilY_snapshot = pupilY;
+      int pupilRadius_snapshot = pupilRadius;
+      int eyeRadius_snapshot = eyeRadius;
+      int pupil_offset_x_snapshot = pupil_offset_x;
+      int pupil_offset_y_snapshot = pupil_offset_y;
 
-      draw_eye_with_pupil_to_buffer(BUF_W/2, BUF_H/2, pupilRadius, eyeRadius, pupil_offset_x, pupil_offset_y, LCD128_BLACK, EYE_BLUE_1, LCD128_WHITE, LCD128_BLACK);
-
-
-	    LCD128_DrawImage_DMA(&lcd1, pupilX - BUF_W/2, pupilY - BUF_H/2, BUF_W, BUF_H, (uint16_t*)framebuf);
-	    LCD128_DrawImage_DMA(&lcd2, pupilX - BUF_W/2, pupilY - BUF_H/2, BUF_W, BUF_H, (uint16_t*)framebuf);
-	    while (lcd128_dma_busy);
+      // Gửi từng hàng, KHÔNG cần framebuf lớn
+      uint16_t linebuf[BUF_W * BLOCK_LINES];
+      int highlight_tick_snapshot = global_highlight_tick;
+      for (int y = 0; y < BUF_H; y += BLOCK_LINES) {
+          int lines_to_send = (y + BLOCK_LINES <= BUF_H) ? BLOCK_LINES : (BUF_H - y);
+          for (int i = 0; i < lines_to_send; i++) {
+              draw_eye_line_with_pupil_to_buffer(y + i, BUF_W/2, BUF_H/2, pupilRadius_snapshot, eyeRadius_snapshot, pupil_offset_x_snapshot, pupil_offset_y_snapshot,
+                                                 LCD128_BLACK, EYE_BLUE_1, LCD128_WHITE, LCD128_BLACK,
+                                                 &linebuf[i * BUF_W],
+                                                 highlight_tick_snapshot);
+          }
+          LCD128_DrawImage_DMA(&lcd1, pupilX_snapshot - BUF_W/2, pupilY_snapshot - BUF_H/2 + y, BUF_W, lines_to_send, linebuf);
+          while (lcd128_dma_busy);
+          LCD128_DrawImage_DMA(&lcd2, pupilX_snapshot - BUF_W/2, pupilY_snapshot - BUF_H/2 + y, BUF_W, lines_to_send, linebuf);
+          while (lcd128_dma_busy);
+      }
 
       // --- PAUSE LOGIC ---
-      static int pause_counter = 0;
-      static int is_pausing = 0;
-      int is_random_state = (state == STATE_RANDOM_MOVE || state == STATE_RANDOM_MOVE1 || state == STATE_RANDOM_TO_CENTER);
-      if (lerp_t >= 1.0f) {
-          if (!is_random_state) { // Chỉ pause nếu KHÔNG phải random
-              if (!is_pausing) {
-                  pause_counter = 0;
-                  is_pausing = 1;
-              }
-              if (pause_counter < 10) { // 40 frame ~ 0.7s
-                  pause_counter++;
-                  return;
-              }
-              is_pausing = 0;
-          }
-          // Sau khi pause (hoặc nếu là random), cho phép chuyển trạng thái mới
-      }
+      // static int pause_counter = 0; // Moved to update_animation_state
+      // static int is_pausing = 0; // Moved to update_animation_state
+      // int is_random_state = (state == STATE_RANDOM_MOVE || state == STATE_RANDOM_MOVE1 || state == STATE_RANDOM_TO_CENTER); // Moved to update_animation_state
+      // if (lerp_t >= 1.0f) { // Moved to update_animation_state
+      //     if (!is_random_state) { // Chỉ pause nếu KHÔNG phải random
+      //         if (!is_pausing) {
+      //             pause_counter = 0;
+      //             is_pausing = 1;
+      //         }
+      //         if (pause_counter < 10) { // 40 frame ~ 0.7s
+      //             pause_counter++;
+      //             return;
+      //         }
+      //         is_pausing = 0;
+      //     }
+      //     // Sau khi pause (hoặc nếu là random), cho phép chuyển trạng thái mới
+      // }
 
-      if (lerp_t < 1.0f) {
-          lerp_t += 1.5f / lerp_steps;
-          if (lerp_t > 1.0f) lerp_t = 1.0f;
-          pupilX = lerp_startX + (int)((lerp_targetX - lerp_startX) * lerp_t);
-          pupilY = lerp_startY + (int)((lerp_targetY - lerp_startY) * lerp_t);
-      } else if (!is_pausing) {
-          switch (state) {
-                case STATE_RANDOM_MOVE1: {
-                      int rangeX = rx_in - pupilRadius * 0.5;
-                      int rangeY = ry_in - pupilRadius * 0.5;
-                  
-                      if (random_count < RANDOM_REPEAT) {
-                          lerp_startX = pupilX;
-                          lerp_startY = pupilY;
-                  
-                          // Tạo offset đối xứng quanh tâm
-                          int offsetX = (rand() % rangeX) - rangeX / 2;
-                          int offsetY = (rand() % rangeY) - rangeY / 2;
-                  
-                          lerp_targetX = centerX + offsetX;
-                          lerp_targetY = centerY + offsetY;
-                          lerp_t = 0.0f;
-                          random_count++;
-                      } else {
-                          random_count = 0;
-                          lerp_startX = pupilX;
-                          lerp_startY = pupilY;
-                          lerp_targetX = centerX;
-                          lerp_targetY = centerY;
-                          lerp_t = 0.0f;
-                          state_index++;
-                          if (state_index >= state_sequence_len) state_index = 0;
-                          state = state_sequence[state_index];
-                      }
-                      break;
-                  }
-              case STATE_UP_FROM_CENTER:
-                  lerp_startX = pupilX; lerp_startY = pupilY;
-                  lerp_targetX = centerX;
-                  lerp_targetY = centerY - (ry_in - pupilRadius);
-                  lerp_t = 0.0f;
-                  state_index++;
-                  if (state_index >= state_sequence_len) state_index = 0;
-                  state = state_sequence[state_index];
-                  break;
-              case STATE_DOWN_TO_CENTER:
-                  lerp_startX = pupilX; lerp_startY = pupilY;
-                  lerp_targetX = centerX;
-                  lerp_targetY = centerY;
-                  lerp_t = 0.0f;
-                  state_index++;
-                  if (state_index >= state_sequence_len) state_index = 0;
-                  state = state_sequence[state_index];
-                  break;
-              case STATE_LEFT_FROM_CENTER:
-                  lerp_startX = pupilX; lerp_startY = pupilY;
-                  lerp_targetX = centerX - (rx_in - pupilRadius);
-                  lerp_targetY = centerY;
-                  lerp_t = 0.0f;
-                  state_index++;
-                  if (state_index >= state_sequence_len) state_index = 0;
-                  state = state_sequence[state_index];
-                  break;
-              case STATE_RIGHT_TO_CENTER:
-                  lerp_startX = pupilX; lerp_startY = pupilY;
-                  lerp_targetX = centerX;
-                  lerp_targetY = centerY;
-                  lerp_t = 0.0f;
-                  state_index++;
-                  if (state_index >= state_sequence_len) state_index = 0;
-                  state = state_sequence[state_index];
-                  break;
-              case STATE_DOWN_FROM_CENTER:
-                  lerp_startX = pupilX; lerp_startY = pupilY;
-                  lerp_targetX = centerX;
-                  lerp_targetY = centerY + (ry_in - pupilRadius);
-                  lerp_t = 0.0f;
-                  state_index++;
-                  if (state_index >= state_sequence_len) state_index = 0;
-                  state = state_sequence[state_index];
-                  break;
-              case STATE_UP_TO_CENTER:
-                  lerp_startX = pupilX; lerp_startY = pupilY;
-                  lerp_targetX = centerX;
-                  lerp_targetY = centerY;
-                  lerp_t = 0.0f;
-                  state_index++;
-                  if (state_index >= state_sequence_len) state_index = 0;
-                  state = state_sequence[state_index];
-                  break;
-              case STATE_RIGHT_FROM_CENTER:
-                  lerp_startX = pupilX; lerp_startY = pupilY;
-                  lerp_targetX = centerX + (rx_in - pupilRadius);
-                  lerp_targetY = centerY;
-                  lerp_t = 0.0f;
-                  state_index++;
-                  if (state_index >= state_sequence_len) state_index = 0;
-                  state = state_sequence[state_index];
-                  break;
-              case STATE_LEFT_TO_CENTER:
-                  lerp_startX = pupilX; lerp_startY = pupilY;
-                  lerp_targetX = centerX;
-                  lerp_targetY = centerY;
-                  lerp_t = 0.0f;
-                  state_index++;
-                  if (state_index >= state_sequence_len) state_index = 0;
-                  state = state_sequence[state_index];
-                  break;
-              case STATE_UPLEFT_FROM_CENTER:
-                  lerp_startX = pupilX; lerp_startY = pupilY;
-                  lerp_targetX = centerX - (rx_in - pupilRadius) * 0.7f;
-                  lerp_targetY = centerY - (ry_in - pupilRadius) * 0.7f;
-                  lerp_t = 0.0f;
-                  state_index++;
-                  if (state_index >= state_sequence_len) state_index = 0;
-                  state = state_sequence[state_index];
-                  break;
-              case STATE_DOWNRIGHT_TO_CENTER:
-                  lerp_startX = pupilX; lerp_startY = pupilY;
-                  lerp_targetX = centerX;
-                  lerp_targetY = centerY;
-                  lerp_t = 0.0f;
-                  state_index++;
-                  if (state_index >= state_sequence_len) state_index = 0;
-                  state = state_sequence[state_index];
-                  break;
-              case STATE_UPRIGHT_FROM_CENTER:
-                  lerp_startX = pupilX; lerp_startY = pupilY;
-                  lerp_targetX = centerX + (rx_in - pupilRadius) * 0.7f;
-                  lerp_targetY = centerY - (ry_in - pupilRadius) * 0.7f;
-                  lerp_t = 0.0f;
-                  state_index++;
-                  if (state_index >= state_sequence_len) state_index = 0;
-                  state = state_sequence[state_index];
-                  break;
-              case STATE_DOWNLEFT_TO_CENTER:
-                  lerp_startX = pupilX; lerp_startY = pupilY;
-                  lerp_targetX = centerX;
-                  lerp_targetY = centerY;
-                  lerp_t = 0.0f;
-                  state_index++;
-                  if (state_index >= state_sequence_len) state_index = 0;
-                  state = state_sequence[state_index];
-                  break;
-              case STATE_DOWNLEFT_FROM_CENTER:
-                  lerp_startX = pupilX; lerp_startY = pupilY;
-                  lerp_targetX = centerX - (rx_in - pupilRadius) * 0.7f;
-                  lerp_targetY = centerY + (ry_in - pupilRadius) * 0.7f;
-                  lerp_t = 0.0f;
-                  state_index++;
-                  if (state_index >= state_sequence_len) state_index = 0;
-                  state = state_sequence[state_index];
-                  break;
-              case STATE_UPRIGHT_TO_CENTER:
-                  lerp_startX = pupilX; lerp_startY = pupilY;
-                  lerp_targetX = centerX;
-                  lerp_targetY = centerY;
-                  lerp_t = 0.0f;
-                  state_index++;
-                  if (state_index >= state_sequence_len) state_index = 0;
-                  state = state_sequence[state_index];
-                  break;
-              case STATE_DOWNRIGHT_FROM_CENTER:
-                  lerp_startX = pupilX; lerp_startY = pupilY;
-                  lerp_targetX = centerX + (rx_in - pupilRadius) * 0.7f;
-                  lerp_targetY = centerY + (ry_in - pupilRadius) * 0.7f;
-                  lerp_t = 0.0f;
-                  state_index++;
-                  if (state_index >= state_sequence_len) state_index = 0;
-                  state = state_sequence[state_index];
-                  break;
-              case STATE_UPLEFT_TO_CENTER:
-                  lerp_startX = pupilX; lerp_startY = pupilY;
-                  lerp_targetX = centerX;
-                  lerp_targetY = centerY;
-                  lerp_t = 0.0f;
-                  state_index++;
-                  if (state_index >= state_sequence_len) state_index = 0;
-                  state = state_sequence[state_index];
-                  break;
-              // Random move
-              case STATE_RANDOM_MOVE:
-                  if (random_count < RANDOM_REPEAT) {
-                      lerp_startX = pupilX; lerp_startY = pupilY;
-                      lerp_targetX = centerX + (rand() % (rx_in - pupilRadius * 2));
-                      lerp_targetY = centerY + (rand() % (ry_in - pupilRadius * 2));
-                      lerp_t = 0.0f;
-                      random_count++;
-                  } else {
-                      random_count = 0;
-                      lerp_startX = pupilX; lerp_startY = pupilY;
-                      lerp_targetX = centerX;
-                      lerp_targetY = centerY;
-                      lerp_t = 0.0f;
-                      state_index++;
-                      if (state_index >= state_sequence_len) state_index = 0;
-                      state = state_sequence[state_index];
-                  }
-                  break;           
-              case STATE_RANDOM_TO_CENTER:
-                  lerp_startX = pupilX; lerp_startY = pupilY;
-                  lerp_targetX = centerX;
-                  lerp_targetY = centerY;
-                  lerp_t = 0.0f;
-                  state_index++;
-                  if (state_index >= state_sequence_len) state_index = 0;
-                  state = state_sequence[state_index];
-                  break;
-              case STATE_PUPIL_ROTATE:
-                  break;
+      // if (lerp_t < 1.0f) { // Moved to update_animation_state
+      //     lerp_t += 1.5f / lerp_steps;
+      //     if (lerp_t > 1.0f) lerp_t = 1.0f;
+      //     pupilX = lerp_startX + (int)((lerp_targetX - lerp_startX) * lerp_t);
+      //     pupilY = lerp_startY + (int)((lerp_targetY - lerp_startY) * lerp_t);
+      // } else if (!is_pausing) { // Moved to update_animation_state
+      //     switch (state) { // Moved to update_animation_state
+      //           case STATE_RANDOM_MOVE1: { // Moved to update_animation_state
+      //               int rangeX = rx_in - pupilRadius * 0.5; // Moved to update_animation_state
+      //               int rangeY = ry_in - pupilRadius * 0.5; // Moved to update_animation_state
+      //               if (random_count < RANDOM_REPEAT) { // Moved to update_animation_state
+      //                   lerp_startX = pupilX; // Moved to update_animation_state
+      //                   lerp_startY = pupilY; // Moved to update_animation_state
+      //                   int offsetX = (rand() % rangeX) - rangeX / 2; // Moved to update_animation_state
+      //                   int offsetY = (rand() % rangeY) - rangeY / 2; // Moved to update_animation_state
+      //                   lerp_targetX = centerX + offsetX; // Moved to update_animation_state
+      //                   lerp_targetY = centerY + offsetY; // Moved to update_animation_state
+      //                   lerp_t = 0.0f; // Moved to update_animation_state
+      //                   random_count++; // Moved to update_animation_state
+      //               } else { // Moved to update_animation_state
+      //                   random_count = 0; // Moved to update_animation_state
+      //                   lerp_startX = pupilX; // Moved to update_animation_state
+      //                   lerp_startY = pupilY; // Moved to update_animation_state
+      //                   lerp_targetX = centerX; // Moved to update_animation_state
+      //                   lerp_targetY = centerY; // Moved to update_animation_state
+      //                   lerp_t = 0.0f; // Moved to update_animation_state
+      //                   state_index++; // Moved to update_animation_state
+      //                   if (state_index >= state_sequence_len) state_index = 0; // Moved to update_animation_state
+      //                   state = state_sequence[state_index]; // Moved to update_animation_state
+      //               } // Moved to update_animation_state
+      //               break; // Moved to update_animation_state
+      //           } // Moved to update_animation_state
+      //       case STATE_UP_FROM_CENTER: // Moved to update_animation_state
+      //           lerp_startX = pupilX; lerp_startY = pupilY; // Moved to update_animation_state
+      //           lerp_targetX = centerX; // Moved to update_animation_state
+      //           lerp_targetY = centerY - (ry_in - pupilRadius); // Moved to update_animation_state
+      //           lerp_t = 0.0f; // Moved to update_animation_state
+      //           state_index++; // Moved to update_animation_state
+      //           if (state_index >= state_sequence_len) state_index = 0; // Moved to update_animation_state
+      //           state = state_sequence[state_index]; // Moved to update_animation_state
+      //           break; // Moved to update_animation_state
+      //       case STATE_DOWN_TO_CENTER: // Moved to update_animation_state
+      //           lerp_startX = pupilX; lerp_startY = pupilY; // Moved to update_animation_state
+      //           lerp_targetX = centerX; // Moved to update_animation_state
+      //           lerp_targetY = centerY; // Moved to update_animation_state
+      //           lerp_t = 0.0f; // Moved to update_animation_state
+      //           state_index++; // Moved to update_animation_state
+      //           if (state_index >= state_sequence_len) state_index = 0; // Moved to update_animation_state
+      //           state = state_sequence[state_index]; // Moved to update_animation_state
+      //           break; // Moved to update_animation_state
+      //       case STATE_LEFT_FROM_CENTER: // Moved to update_animation_state
+      //           lerp_startX = pupilX; lerp_startY = pupilY; // Moved to update_animation_state
+      //           lerp_targetX = centerX - (rx_in - pupilRadius); // Moved to update_animation_state
+      //           lerp_targetY = centerY; // Moved to update_animation_state
+      //           lerp_t = 0.0f; // Moved to update_animation_state
+      //           state_index++; // Moved to update_animation_state
+      //           if (state_index >= state_sequence_len) state_index = 0; // Moved to update_animation_state
+      //           state = state_sequence[state_index]; // Moved to update_animation_state
+      //           break; // Moved to update_animation_state
+      //       case STATE_RIGHT_TO_CENTER: // Moved to update_animation_state
+      //           lerp_startX = pupilX; lerp_startY = pupilY; // Moved to update_animation_state
+      //           lerp_targetX = centerX; // Moved to update_animation_state
+      //           lerp_targetY = centerY; // Moved to update_animation_state
+      //           lerp_t = 0.0f; // Moved to update_animation_state
+      //           state_index++; // Moved to update_animation_state
+      //           if (state_index >= state_sequence_len) state_index = 0; // Moved to update_animation_state
+      //           state = state_sequence[state_index]; // Moved to update_animation_state
+      //           break; // Moved to update_animation_state
+      //       case STATE_DOWN_FROM_CENTER: // Moved to update_animation_state
+      //           lerp_startX = pupilX; lerp_startY = pupilY; // Moved to update_animation_state
+      //           lerp_targetX = centerX; // Moved to update_animation_state
+      //           lerp_targetY = centerY + (ry_in - pupilRadius); // Moved to update_animation_state
+      //           lerp_t = 0.0f; // Moved to update_animation_state
+      //           state_index++; // Moved to update_animation_state
+      //           if (state_index >= state_sequence_len) state_index = 0; // Moved to update_animation_state
+      //           state = state_sequence[state_index]; // Moved to update_animation_state
+      //           break; // Moved to update_animation_state
+      //       case STATE_UP_TO_CENTER: // Moved to update_animation_state
+      //           lerp_startX = pupilX; lerp_startY = pupilY; // Moved to update_animation_state
+      //           lerp_targetX = centerX; // Moved to update_animation_state
+      //           lerp_targetY = centerY; // Moved to update_animation_state
+      //           lerp_t = 0.0f; // Moved to update_animation_state
+      //           state_index++; // Moved to update_animation_state
+      //           if (state_index >= state_sequence_len) state_index = 0; // Moved to update_animation_state
+      //           state = state_sequence[state_index]; // Moved to update_animation_state
+      //           break; // Moved to update_animation_state
+      //       case STATE_RIGHT_FROM_CENTER: // Moved to update_animation_state
+      //           lerp_startX = pupilX; lerp_startY = pupilY; // Moved to update_animation_state
+      //           lerp_targetX = centerX + (rx_in - pupilRadius); // Moved to update_animation_state
+      //           lerp_targetY = centerY; // Moved to update_animation_state
+      //           lerp_t = 0.0f; // Moved to update_animation_state
+      //           state_index++; // Moved to update_animation_state
+      //           if (state_index >= state_sequence_len) state_index = 0; // Moved to update_animation_state
+      //           state = state_sequence[state_index]; // Moved to update_animation_state
+      //           break; // Moved to update_animation_state
+      //       case STATE_LEFT_TO_CENTER: // Moved to update_animation_state
+      //           lerp_startX = pupilX; lerp_startY = pupilY; // Moved to update_animation_state
+      //           lerp_targetX = centerX; // Moved to update_animation_state
+      //           lerp_targetY = centerY; // Moved to update_animation_state
+      //           lerp_t = 0.0f; // Moved to update_animation_state
+      //           state_index++; // Moved to update_animation_state
+      //           if (state_index >= state_sequence_len) state_index = 0; // Moved to update_animation_state
+      //           state = state_sequence[state_index]; // Moved to update_animation_state
+      //           break; // Moved to update_animation_state
+      //       case STATE_UPLEFT_FROM_CENTER: // Moved to update_animation_state
+      //           lerp_startX = pupilX; lerp_startY = pupilY; // Moved to update_animation_state
+      //           lerp_targetX = centerX - (rx_in - pupilRadius) * 0.7f; // Moved to update_animation_state
+      //           lerp_targetY = centerY - (ry_in - pupilRadius) * 0.7f; // Moved to update_animation_state
+      //           lerp_t = 0.0f; // Moved to update_animation_state
+      //           state_index++; // Moved to update_animation_state
+      //           if (state_index >= state_sequence_len) state_index = 0; // Moved to update_animation_state
+      //           state = state_sequence[state_index]; // Moved to update_animation_state
+      //           break; // Moved to update_animation_state
+      //       case STATE_DOWNRIGHT_TO_CENTER: // Moved to update_animation_state
+      //           lerp_startX = pupilX; lerp_startY = pupilY; // Moved to update_animation_state
+      //           lerp_targetX = centerX; // Moved to update_animation_state
+      //           lerp_targetY = centerY; // Moved to update_animation_state
+      //           lerp_t = 0.0f; // Moved to update_animation_state
+      //           state_index++; // Moved to update_animation_state
+      //           if (state_index >= state_sequence_len) state_index = 0; // Moved to update_animation_state
+      //           state = state_sequence[state_index]; // Moved to update_animation_state
+      //           break; // Moved to update_animation_state
+      //       case STATE_UPRIGHT_FROM_CENTER: // Moved to update_animation_state
+      //           lerp_startX = pupilX; lerp_startY = pupilY; // Moved to update_animation_state
+      //           lerp_targetX = centerX + (rx_in - pupilRadius) * 0.7f; // Moved to update_animation_state
+      //           lerp_targetY = centerY - (ry_in - pupilRadius) * 0.7f; // Moved to update_animation_state
+      //           lerp_t = 0.0f; // Moved to update_animation_state
+      //           state_index++; // Moved to update_animation_state
+      //           if (state_index >= state_sequence_len) state_index = 0; // Moved to update_animation_state
+      //           state = state_sequence[state_index]; // Moved to update_animation_state
+      //           break; // Moved to update_animation_state
+      //       case STATE_DOWNLEFT_TO_CENTER: // Moved to update_animation_state
+      //           lerp_startX = pupilX; lerp_startY = pupilY; // Moved to update_animation_state
+      //           lerp_targetX = centerX; // Moved to update_animation_state
+      //           lerp_targetY = centerY; // Moved to update_animation_state
+      //           lerp_t = 0.0f; // Moved to update_animation_state
+      //           state_index++; // Moved to update_animation_state
+      //           if (state_index >= state_sequence_len) state_index = 0; // Moved to update_animation_state
+      //           state = state_sequence[state_index]; // Moved to update_animation_state
+      //           break; // Moved to update_animation_state
+      //       case STATE_DOWNLEFT_FROM_CENTER: // Moved to update_animation_state
+      //           lerp_startX = pupilX; lerp_startY = pupilY; // Moved to update_animation_state
+      //           lerp_targetX = centerX - (rx_in - pupilRadius) * 0.7f; // Moved to update_animation_state
+      //           lerp_targetY = centerY + (ry_in - pupilRadius) * 0.7f; // Moved to update_animation_state
+      //           lerp_t = 0.0f; // Moved to update_animation_state
+      //           state_index++; // Moved to update_animation_state
+      //           if (state_index >= state_sequence_len) state_index = 0; // Moved to update_animation_state
+      //           state = state_sequence[state_index]; // Moved to update_animation_state
+      //           break; // Moved to update_animation_state
+      //       case STATE_UPRIGHT_TO_CENTER: // Moved to update_animation_state
+      //           lerp_startX = pupilX; lerp_startY = pupilY; // Moved to update_animation_state
+      //           lerp_targetX = centerX; // Moved to update_animation_state
+      //           lerp_targetY = centerY; // Moved to update_animation_state
+      //           lerp_t = 0.0f; // Moved to update_animation_state
+      //           state_index++; // Moved to update_animation_state
+      //           if (state_index >= state_sequence_len) state_index = 0; // Moved to update_animation_state
+      //           state = state_sequence[state_index]; // Moved to update_animation_state
+      //           break; // Moved to update_animation_state
+      //       case STATE_DOWNRIGHT_FROM_CENTER: // Moved to update_animation_state
+      //           lerp_startX = pupilX; lerp_startY = pupilY; // Moved to update_animation_state
+      //           lerp_targetX = centerX + (rx_in - pupilRadius) * 0.7f; // Moved to update_animation_state
+      //           lerp_targetY = centerY + (ry_in - pupilRadius) * 0.7f; // Moved to update_animation_state
+      //           lerp_t = 0.0f; // Moved to update_animation_state
+      //           state_index++; // Moved to update_animation_state
+      //           if (state_index >= state_sequence_len) state_index = 0; // Moved to update_animation_state
+      //           state = state_sequence[state_index]; // Moved to update_animation_state
+      //           break; // Moved to update_animation_state
+      //       case STATE_UPLEFT_TO_CENTER: // Moved to update_animation_state
+      //           lerp_startX = pupilX; lerp_startY = pupilY; // Moved to update_animation_state
+      //           lerp_targetX = centerX; // Moved to update_animation_state
+      //           lerp_targetY = centerY; // Moved to update_animation_state
+      //           lerp_t = 0.0f; // Moved to update_animation_state
+      //           state_index++; // Moved to update_animation_state
+      //           if (state_index >= state_sequence_len) state_index = 0; // Moved to update_animation_state
+      //           state = state_sequence[state_index]; // Moved to update_animation_state
+      //           break; // Moved to update_animation_state
+      //       // Random move // Moved to update_animation_state
+      //       case STATE_RANDOM_MOVE: // Moved to update_animation_state
+      //           if (random_count < RANDOM_REPEAT) { // Moved to update_animation_state
+      //               lerp_startX = pupilX; lerp_startY = pupilY; // Moved to update_animation_state
+      //               lerp_targetX = centerX + (rand() % (rx_in - pupilRadius * 2)); // Moved to update_animation_state
+      //               lerp_targetY = centerY + (rand() % (ry_in - pupilRadius * 2)); // Moved to update_animation_state
+      //               lerp_t = 0.0f; // Moved to update_animation_state
+      //               random_count++; // Moved to update_animation_state
+      //           } else { // Moved to update_animation_state
+      //               random_count = 0; // Moved to update_animation_state
+      //               lerp_startX = pupilX; lerp_startY = pupilY; // Moved to update_animation_state
+      //               lerp_targetX = centerX; // Moved to update_animation_state
+      //               lerp_targetY = centerY; // Moved to update_animation_state
+      //               lerp_t = 0.0f; // Moved to update_animation_state
+      //               state_index++; // Moved to update_animation_state
+      //               if (state_index >= state_sequence_len) state_index = 0; // Moved to update_animation_state
+      //               state = state_sequence[state_index]; // Moved to update_animation_state
+      //           } // Moved to update_animation_state
+      //           break;            // Moved to update_animation_state
+      //       case STATE_RANDOM_TO_CENTER: // Moved to update_animation_state
+      //           lerp_startX = pupilX; lerp_startY = pupilY; // Moved to update_animation_state
+      //           lerp_targetX = centerX; // Moved to update_animation_state
+      //           lerp_targetY = centerY; // Moved to update_animation_state
+      //           lerp_t = 0.0f; // Moved to update_animation_state
+      //           state_index++; // Moved to update_animation_state
+      //           if (state_index >= state_sequence_len) state_index = 0; // Moved to update_animation_state
+      //           state = state_sequence[state_index]; // Moved to update_animation_state
+      //           break; // Moved to update_animation_state
+      //       case STATE_PUPIL_ROTATE: // Moved to update_animation_state
+      //           break; // Moved to update_animation_state
               
-          }
-      }
+      //   } // Moved to update_animation_state
+      // } // Moved to update_animation_state
 }
 
-void draw_eye_with_pupil_to_buffer(
-  int cx, int cy, int r,
+/**
+  * @brief  This function is executed in case of error occurrence.
+  * @retval None
+  */
+void Error_Handler(void)
+{
+  /* USER CODE BEGIN Error_Handler_Debug */
+  /* User can add his own implementation to report the HAL error return state */
+  __disable_irq();
+  while (1)
+  {
+  }
+  /* USER CODE END Error_Handler_Debug */
+}
+#ifdef USE_FULL_ASSERT
+/**
+  * @brief  Reports the name of the source file and the source line number
+  *         where the assert_param error has occurred.
+  * @param  file: pointer to the source file name
+  * @param  line: assert_param error line source number
+  * @retval None
+  */
+void assert_failed(uint8_t *file, uint32_t line)
+{
+  /* USER CODE BEGIN 6 */
+  /* User can add his own implementation to report the file name and line number,
+     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+  /* USER CODE END 6 */
+}
+#endif /* USE_FULL_ASSERT */
+
+// update_animation_state chỉ cập nhật logic chuyển động, không vẽ/gửi
+void update_animation_state(void) {
+    global_highlight_tick++;
+    static int pause_counter = 0;
+    static int is_pausing = 0;
+    int is_random_state = (state == STATE_RANDOM_MOVE || state == STATE_RANDOM_MOVE1 || state == STATE_RANDOM_TO_CENTER);
+    if (lerp_t >= 1.0f) {
+        if (!is_random_state) { // Chỉ pause nếu KHÔNG phải random
+            if (!is_pausing) {
+                pause_counter = 0;
+                is_pausing = 1;
+            }
+            if (pause_counter < 10) { // 40 frame ~ 0.7s
+                pause_counter++;
+                return;
+            }
+            is_pausing = 0;
+        }
+    }
+
+    if (lerp_t < 1.0f) {
+        lerp_t += 1.4f / lerp_steps;
+        if (lerp_t > 1.0f) lerp_t = 1.0f;
+        pupilX = lerp_startX + (int)((lerp_targetX - lerp_startX) * lerp_t);
+        pupilY = lerp_startY + (int)((lerp_targetY - lerp_startY) * lerp_t);
+    } else if (!is_pausing) {
+        switch (state) {
+            case STATE_RANDOM_MOVE1: {
+                int rangeX = rx_in - pupilRadius * 0.5;
+                int rangeY = ry_in - pupilRadius * 0.5;
+                if (random_count < RANDOM_REPEAT) {
+                    lerp_startX = pupilX;
+                    lerp_startY = pupilY;
+                    int offsetX = (rand() % rangeX) - rangeX / 2;
+                    int offsetY = (rand() % rangeY) - rangeY / 2;
+                    lerp_targetX = centerX + offsetX;
+                    lerp_targetY = centerY + offsetY;
+                    lerp_t = 0.0f;
+                    random_count++;
+                } else {
+                    random_count = 0;
+                    lerp_startX = pupilX;
+                    lerp_startY = pupilY;
+                    lerp_targetX = centerX;
+                    lerp_targetY = centerY;
+                    lerp_t = 0.0f;
+                    state_index++;
+                    if (state_index >= state_sequence_len) state_index = 0;
+                    state = state_sequence[state_index];
+                }
+                break;
+            }
+            case STATE_UP_FROM_CENTER:
+                lerp_startX = pupilX; lerp_startY = pupilY;
+                lerp_targetX = centerX;
+                lerp_targetY = centerY - (ry_in - pupilRadius);
+                lerp_t = 0.0f;
+                state_index++;
+                if (state_index >= state_sequence_len) state_index = 0;
+                state = state_sequence[state_index];
+                break;
+            case STATE_DOWN_TO_CENTER:
+                lerp_startX = pupilX; lerp_startY = pupilY;
+                lerp_targetX = centerX;
+                lerp_targetY = centerY;
+                lerp_t = 0.0f;
+                state_index++;
+                if (state_index >= state_sequence_len) state_index = 0;
+                state = state_sequence[state_index];
+                break;
+            case STATE_LEFT_FROM_CENTER:
+                lerp_startX = pupilX; lerp_startY = pupilY;
+                lerp_targetX = centerX - (rx_in - pupilRadius);
+                lerp_targetY = centerY;
+                lerp_t = 0.0f;
+                state_index++;
+                if (state_index >= state_sequence_len) state_index = 0;
+                state = state_sequence[state_index];
+                break;
+            case STATE_RIGHT_TO_CENTER:
+                lerp_startX = pupilX; lerp_startY = pupilY;
+                lerp_targetX = centerX;
+                lerp_targetY = centerY;
+                lerp_t = 0.0f;
+                state_index++;
+                if (state_index >= state_sequence_len) state_index = 0;
+                state = state_sequence[state_index];
+                break;
+            case STATE_DOWN_FROM_CENTER:
+                lerp_startX = pupilX; lerp_startY = pupilY;
+                lerp_targetX = centerX;
+                lerp_targetY = centerY + (ry_in - pupilRadius);
+                lerp_t = 0.0f;
+                state_index++;
+                if (state_index >= state_sequence_len) state_index = 0;
+                state = state_sequence[state_index];
+                break;
+            case STATE_UP_TO_CENTER:
+                lerp_startX = pupilX; lerp_startY = pupilY;
+                lerp_targetX = centerX;
+                lerp_targetY = centerY;
+                lerp_t = 0.0f;
+                state_index++;
+                if (state_index >= state_sequence_len) state_index = 0;
+                state = state_sequence[state_index];
+                break;
+            case STATE_RIGHT_FROM_CENTER:
+                lerp_startX = pupilX; lerp_startY = pupilY;
+                lerp_targetX = centerX + (rx_in - pupilRadius);
+                lerp_targetY = centerY;
+                lerp_t = 0.0f;
+                state_index++;
+                if (state_index >= state_sequence_len) state_index = 0;
+                state = state_sequence[state_index];
+                break;
+            case STATE_LEFT_TO_CENTER:
+                lerp_startX = pupilX; lerp_startY = pupilY;
+                lerp_targetX = centerX;
+                lerp_targetY = centerY;
+                lerp_t = 0.0f;
+                state_index++;
+                if (state_index >= state_sequence_len) state_index = 0;
+                state = state_sequence[state_index];
+                break;
+            case STATE_UPLEFT_FROM_CENTER:
+                lerp_startX = pupilX; lerp_startY = pupilY;
+                lerp_targetX = centerX - (rx_in - pupilRadius) / 1.4;
+                lerp_targetY = centerY - (ry_in - pupilRadius) / 1.4;
+                lerp_t = 0.0f;
+                state_index++;
+                if (state_index >= state_sequence_len) state_index = 0;
+                state = state_sequence[state_index];
+                break;
+            case STATE_DOWNRIGHT_TO_CENTER:
+                lerp_startX = pupilX; lerp_startY = pupilY;
+                lerp_targetX = centerX;
+                lerp_targetY = centerY;
+                lerp_t = 0.0f;
+                state_index++;
+                if (state_index >= state_sequence_len) state_index = 0;
+                state = state_sequence[state_index];
+                break;
+            case STATE_UPRIGHT_TO_CENTER:
+                lerp_startX = pupilX; lerp_startY = pupilY;
+                lerp_targetX = centerX;
+                lerp_targetY = centerY;
+                lerp_t = 0.0f;
+                state_index++;
+                if (state_index >= state_sequence_len) state_index = 0;
+                state = state_sequence[state_index];
+                break;
+            case STATE_UPRIGHT_FROM_CENTER:
+                lerp_startX = pupilX; lerp_startY = pupilY;
+                lerp_targetX = centerX + (rx_in - pupilRadius) / 1.4;
+                lerp_targetY = centerY - (ry_in - pupilRadius) / 1.4;
+                lerp_t = 0.0f;
+                state_index++;
+                if (state_index >= state_sequence_len) state_index = 0;
+                state = state_sequence[state_index];
+                break;
+            case STATE_DOWNLEFT_TO_CENTER:
+                lerp_startX = pupilX; lerp_startY = pupilY;
+                lerp_targetX = centerX;
+                lerp_targetY = centerY;
+                lerp_t = 0.0f;
+                state_index++;
+                if (state_index >= state_sequence_len) state_index = 0;
+                state = state_sequence[state_index];
+                break;
+            case STATE_DOWNLEFT_FROM_CENTER:
+                lerp_startX = pupilX; lerp_startY = pupilY;
+                lerp_targetX = centerX - (rx_in - pupilRadius) / 1.4;
+                lerp_targetY = centerY + (ry_in - pupilRadius) / 1.4;
+                lerp_t = 0.0f;
+                state_index++;
+                if (state_index >= state_sequence_len) state_index = 0;
+                state = state_sequence[state_index];
+                break;
+            case STATE_UPLEFT_TO_CENTER:
+                lerp_startX = pupilX; lerp_startY = pupilY;
+                lerp_targetX = centerX;
+                lerp_targetY = centerY;
+                lerp_t = 0.0f;
+                state_index++;
+                if (state_index >= state_sequence_len) state_index = 0;
+                state = state_sequence[state_index];
+                break;
+            case STATE_RANDOM_MOVE:
+                {
+                    int rangeX = rx_in - pupilRadius * 0.5;
+                    int rangeY = ry_in - pupilRadius * 0.5;
+                    lerp_startX = pupilX;
+                    lerp_startY = pupilY;
+                    int offsetX = (rand() % rangeX) - rangeX / 2;
+                    int offsetY = (rand() % rangeY) - rangeY / 2;
+                    lerp_targetX = centerX + offsetX;
+                    lerp_targetY = centerY + offsetY;
+                    lerp_t = 0.0f;
+                    state_index++;
+                    if (state_index >= state_sequence_len) state_index = 0;
+                    state = state_sequence[state_index];
+                }
+                break;
+            case STATE_RANDOM_TO_CENTER:
+                lerp_startX = pupilX; lerp_startY = pupilY;
+                lerp_targetX = centerX;
+                lerp_targetY = centerY;
+                lerp_t = 0.0f;
+                state_index++;
+                if (state_index >= state_sequence_len) state_index = 0;
+                state = state_sequence[state_index];
+                break;
+            case STATE_PUPIL_ROTATE:
+                break;
+        }
+    }
+}
+
+// Định nghĩa đúng cho draw_eye_line_with_pupil_to_buffer:
+void draw_eye_line_with_pupil_to_buffer(
+  int y, int cx, int cy, int r,
   int pupil_r, int pupil_offset_x, int pupil_offset_y,
-  uint16_t outer_color, uint16_t inner_color, uint16_t bgcolor, uint16_t pupil_color
+  uint16_t outer_color, uint16_t inner_color, uint16_t bgcolor, uint16_t pupil_color,
+  uint16_t* linebuf,
+  int highlight_tick
 ) {
   int r2 = r * r ;
   int pupil_cx = cx;
   int pupil_cy = cy;
-  // Biến tick cho hiệu ứng rung highlight
-  static int highlight_tick = 0;
-  highlight_tick++;
-
-  // Tham số rung
-  float shake_ampl = 2.0f; // Biên độ rung (pixel)
+  float shake_ampl = 2.0f;
   float shake1 = shake_ampl * sinf(highlight_tick * 0.15f);
   float shake2 = shake_ampl * cosf(highlight_tick * 0.18f);
-  int highlight_cx3 = cx - r / 3 + (int)(1.5f * sinf(highlight_tick * 0.22f)) + 15;
-  int highlight_cy3 = cy - r / 3 + (int)(1.5f * cosf(highlight_tick * 0.19f)) - 3;
+  int highlight_cx3 = cx - r / 3 + (int)(1.5f * sinf(highlight_tick * 0.22f)) + 35;
+  int highlight_cy3 = cy - r / 3 + (int)(1.5f * cosf(highlight_tick * 0.19f)) - 10;
   int show_highlight3 = ((highlight_tick % 120) < 10);
-
-  for (int y = 0; y < BUF_H; y++) {
-      int dy = y - cy;
-      int dy2 = dy * dy;
-      for (int x = 0; x < BUF_W; x++) {
-          int dx = x - cx;
-          int dist2 = dx * dx + dy2;
-          uint16_t color = bgcolor;
-          if (dist2 <= r2) {
-              // // Tính tỷ lệ nội suy (0 - 255)
-              int t = (dist2 * 255) / r2;
-              color = blend_color_fast(inner_color, outer_color, (uint8_t)(t*0.7f));
-              int dx_pupil = x - pupil_cx;
-              int dy_pupil = y - pupil_cy;
-              if (dx_pupil * dx_pupil + dy_pupil * dy_pupil <= pupil_r * pupil_r) {
-                  color = 0x0000;
-              }
+  int dy = y - cy;
+  int dy2 = dy * dy;
+  for (int x = 0; x < BUF_W; x++) {
+      int dx = x - cx;
+      int dist2 = dx * dx + dy2;
+      uint16_t color = bgcolor;
+      if (dist2 <= r2) {
+          int t = (dist2 * 255) / r2;
+          color = blend_color_fast(inner_color, outer_color, (uint8_t)(t*0.7f));
+          int dx_pupil = x - pupil_cx;
+          int dy_pupil = y - pupil_cy;
+          if (dx_pupil * dx_pupil + dy_pupil * dy_pupil <= pupil_r * pupil_r) {
+              color = 0x0000;
           }
-
-          // Vẽ highlight – chấm sáng trong mắt (rung nhẹ quanh vị trí gốc)
-          int highlight_radius = 8;
-          int highlight_cx = cx - r / 3 + (int)shake1;
-          int highlight_cy = cy - r / 3 + (int)shake2;
-          int dx_h = x - highlight_cx;
-          int dy_h = y - highlight_cy;
-          if (dx_h * dx_h + dy_h * dy_h <= highlight_radius * highlight_radius) {
-              color = 0xFFFF; // Màu trắng
-          }
-          // Highlight 2: đối xứng qua tâm, cũng rung nhẹ
-          int highlight_radius1 = 4;
-          int highlight_cx1 = 2 * cx - highlight_cx;
-          int highlight_cy1 = 2 * cy - highlight_cy;
-          int dx_h1 = x - highlight_cx1;
-          int dy_h1 = y - highlight_cy1;
-          if (dx_h1 * dx_h1 + dy_h1 * dy_h1 <= highlight_radius1 * highlight_radius1) {
-              color = 0xFFFF; // Màu trắng
-          }
-
-          int highlight_radius3 = 6;
-          int dx_h3 = x - highlight_cx3;
-          int dy_h3 = y - highlight_cy3;
-          if (show_highlight3 && (dx_h3 * dx_h3 + dy_h3 * dy_h3 <= highlight_radius3 * highlight_radius3)) {
-              color = 0xFFFF;
-          }
-
-          framebuf[y * BUF_W + x] = color;
       }
+      int highlight_radius = 10;
+      int highlight_cx = cx - r / 3 + (int)shake1;
+      int highlight_cy = cy - r / 3 + (int)shake2;
+      int dx_h = x - highlight_cx;
+      int dy_h = y - highlight_cy;
+      if (dx_h * dx_h + dy_h * dy_h <= highlight_radius * highlight_radius) {
+          color = 0xFFFF;
+      }
+      int highlight_radius1 = 4;
+      int highlight_cx1 = 2 * cx - highlight_cx;
+      int highlight_cy1 = 2 * cy - highlight_cy;
+      int dx_h1 = x - highlight_cx1;
+      int dy_h1 = y - highlight_cy1;
+      if (dx_h1 * dx_h1 + dy_h1 * dy_h1 <= highlight_radius1 * highlight_radius1) {
+          color = 0xFFFF;
+      }
+      int highlight_radius3 = 8;
+      int dx_h3 = x - highlight_cx3;
+      int dy_h3 = y - highlight_cy3;
+      if (show_highlight3 && (dx_h3 * dx_h3 + dy_h3 * dy_h3 <= highlight_radius3 * highlight_radius3)) {
+          color = 0xFFFF;
+      }
+      linebuf[x] = color;
   }
 }
 
 
 void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi) {
     if (hspi->Instance == SPI1) {
-        // Đóng CS sau khi DMA xong
-        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_SET); // CS_Pin
+        // Đóng CS sau khi DMA xong cho LCD1
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_SET); // CS_Pin LCD1
+        lcd128_dma_busy = 0;
+    }
+    if (hspi->Instance == SPI2) {
+        // Đóng CS sau khi DMA xong cho LCD2
+        HAL_GPIO_WritePin(GPIOA, GPIO_PIN_10, GPIO_PIN_SET); // CS_Pin LCD2
         lcd128_dma_busy = 0;
     }
 }
@@ -755,34 +1017,3 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 
 /* USER CODE END 4 */
-
-/**
-  * @brief  This function is executed in case of error occurrence.
-  * @retval None
-  */
-void Error_Handler(void)
-{
-  /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
-  __disable_irq();
-  while (1)
-  {
-  }
-  /* USER CODE END Error_Handler_Debug */
-}
-#ifdef USE_FULL_ASSERT
-/**
-  * @brief  Reports the name of the source file and the source line number
-  *         where the assert_param error has occurred.
-  * @param  file: pointer to the source file name
-  * @param  line: assert_param error line source number
-  * @retval None
-  */
-void assert_failed(uint8_t *file, uint32_t line)
-{
-  /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line number,
-     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
-  /* USER CODE END 6 */
-}
-#endif /* USE_FULL_ASSERT */
